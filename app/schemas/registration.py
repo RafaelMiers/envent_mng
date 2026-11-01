@@ -1,6 +1,16 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
+
+from app.schemas.participant import ParticipantCreate
+
+
+class RegistrationStartRequest(ParticipantCreate):
+    email: EmailStr
+
+
+class RegistrationStartRead(BaseModel):
+    participant_id: int
 
 
 class RegistrationCodeRequest(BaseModel):
@@ -16,6 +26,7 @@ class RegistrationAccessRead(BaseModel):
     registration_id: int
     ticket_access_token: str
     expires_at: datetime
+    ticket_email_sent: bool
 
 
 class RegistrationMessageRead(BaseModel):
@@ -44,6 +55,9 @@ class RegistrationOrganizerRead(BaseModel):
     id: int
     participant_id: int
     participant_name: str
+    participant_age: int
+    participant_email: EmailStr | None
+    participant_phone: str | None
     created_at: datetime
     checked_in_at: datetime | None
 

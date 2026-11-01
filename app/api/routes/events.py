@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -35,6 +35,15 @@ def list_events(db: DbSession, organizer: CurrentOrganizer):
     return db.scalars(
         select(Event)
         .where(Event.organizer_id == organizer.id)
+        .order_by(Event.starts_at, Event.id)
+    ).all()
+
+
+@router.get("/public", response_model=list[EventRead])
+def list_public_events(db: DbSession):
+    return db.scalars(
+        select(Event)
+        .where(Event.ends_at > datetime.now(timezone.utc))
         .order_by(Event.starts_at, Event.id)
     ).all()
 
