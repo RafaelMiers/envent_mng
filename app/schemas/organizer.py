@@ -33,23 +33,8 @@ class OrganizerCreate(BaseModel):
             raise ValueError("CNPJ contém caracteres inválidos.")
 
         cnpj = re.sub(r"[^A-Za-z0-9]", "", value).upper()
-        if (
-            len(cnpj) != 14
-            or not cnpj[-2:].isdigit()
-            or len(set(cnpj)) == 1
-        ):
+        if len(cnpj) != 14 or not cnpj[-2:].isdigit():
             raise ValueError("CNPJ inválido.")
-
-        weights = (6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2)
-        for length in (12, 13):
-            total = sum(
-                (ord(character) - 48) * weights[index + 13 - length]
-                for index, character in enumerate(cnpj[:length])
-            )
-            remainder = total % 11
-            check_digit = 0 if remainder < 2 else 11 - remainder
-            if check_digit != int(cnpj[length]):
-                raise ValueError("CNPJ inválido.")
 
         return cnpj
 

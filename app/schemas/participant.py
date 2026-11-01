@@ -32,17 +32,8 @@ class ParticipantCreate(BaseModel):
             raise ValueError("CPF deve conter apenas números, pontos e hífen.")
 
         digits = re.sub(r"\D", "", value)
-        if len(digits) != 11 or len(set(digits)) == 1:
+        if len(digits) != 11:
             raise ValueError("CPF inválido.")
-
-        for length in (9, 10):
-            total = sum(
-                int(digit) * (length + 1 - index)
-                for index, digit in enumerate(digits[:length])
-            )
-            check_digit = (total * 10 % 11) % 10
-            if check_digit != int(digits[length]):
-                raise ValueError("CPF inválido.")
 
         return digits
 

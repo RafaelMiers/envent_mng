@@ -1,4 +1,5 @@
 import hmac
+import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
@@ -14,6 +15,7 @@ from app.core.email import (
     EmailDeliveryError,
     EmailDeliveryNotConfigured,
     send_registration_code,
+    send_ticket_email,
     validate_email_configuration,
 )
 from app.core.qr import create_qr_svg
@@ -37,6 +39,8 @@ from app.schemas.registration import (
     RegistrationCodeVerify,
     RegistrationMessageRead,
     RegistrationOrganizerRead,
+    RegistrationStartRead,
+    RegistrationStartRequest,
     RegistrationTicketRead,
 )
 
@@ -52,6 +56,63 @@ CODE_LIFETIME = timedelta(minutes=10)
 MAX_CODE_REQUESTS_PER_HOUR = 5
 MAX_CODE_ATTEMPTS = 5
 TICKET_GRACE_PERIOD = timedelta(hours=24)
+logger = logging.getLogger(__name__)
+
+
+@registration_router.post(
+    "/start",
+    response_model=RegistrationStartRead,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def start_registration(
+    event_id: int,
+    data: RegistrationStartRequest,
+    db: DbSession,
+):
+    now = datetime.now(timezone.utc)
+    event = db.get(Event, event_id)
+    if event is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Evento não encontrado.",
+        )
+    if event.starts_at <= now:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="As inscrições para este evento estão encerradas.",
+        )
+
+    participant = db.scalar(
+        select(Participant).where(Participant.cpf == data.cpf)
+    )
+    if participant is None:
+        participant = Participant(**data.model_dump())
+        db.add(participant)
+        try:
+            db.flush()
+        except IntegrityError as exc:
+            db.rollback()
+            participant = db.scalar(
+                select(Participant).where(Participant.cpf == data.cpf)
+            )
+            if participant is None:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Não foi possível iniciar a inscrição. Tente novamente.",
+                ) from exc
+
+    if participant.email is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Não há e-mail cadastrado para enviar o código de confirmação.",
+        )
+
+    request_registration_code(
+        event_id,
+        RegistrationCodeRequest(participant_id=participant.id),
+        db,
+    )
+    return RegistrationStartRead(participant_id=participant.id)
 
 
 @registration_router.post(
@@ -263,10 +324,34 @@ def verify_registration_code(
     registration.ticket_expires_at = event.ends_at + TICKET_GRACE_PERIOD
     db.commit()
 
+    ticket_email_sent = False
+    if participant.email is not None:
+        try:
+            send_ticket_email(
+                str(participant.email),
+                participant.name,
+                event.title,
+                event.location,
+                event.starts_at,
+                ticket_token,
+            )
+            ticket_email_sent = True
+        except (EmailDeliveryNotConfigured, EmailDeliveryError):
+            logger.exception(
+                "Could not send ticket email for registration_id=%s.",
+                registration.id,
+            )
+    else:
+        logger.warning(
+            "Could not send ticket email for registration_id=%s.",
+            registration.id,
+        )
+
     return RegistrationAccessRead(
         registration_id=registration.id,
         ticket_access_token=access_token,
         expires_at=registration.ticket_expires_at,
+        ticket_email_sent=ticket_email_sent,
     )
 
 
@@ -358,7 +443,14 @@ def list_event_registrations(
 ):
     get_owned_event(event_id, organizer.id, db)
     registrations = db.execute(
-        select(Registration, Participant.name, CheckIn.checked_at)
+        select(
+            Registration,
+            Participant.name,
+            Participant.age,
+            Participant.email,
+            Participant.phone,
+            CheckIn.checked_at,
+        )
         .join(Participant, Participant.id == Registration.participant_id)
         .outerjoin(CheckIn, CheckIn.registration_id == Registration.id)
         .where(Registration.event_id == event_id)
@@ -369,8 +461,18 @@ def list_event_registrations(
             id=registration.id,
             participant_id=registration.participant_id,
             participant_name=participant_name,
+            participant_age=participant_age,
+            participant_email=participant_email,
+            participant_phone=participant_phone,
             created_at=registration.created_at,
             checked_in_at=checked_in_at,
         )
-        for registration, participant_name, checked_in_at in registrations
+        for (
+            registration,
+            participant_name,
+            participant_age,
+            participant_email,
+            participant_phone,
+            checked_in_at,
+        ) in registrations
     ]
