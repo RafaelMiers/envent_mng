@@ -1,0 +1,8 @@
+fastapi[standard]
+sqlalchemy>=2.0
+psycopg[binary]
+alembic
+pydantic-settings
+pwdlib[argon2]>=0.2.0
+PyJWT>=2.8
+qrcode>=8.0
