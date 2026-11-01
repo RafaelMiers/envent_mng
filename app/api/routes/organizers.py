@@ -1,11 +1,13 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import DbSession
 from app.api.routes.auth import get_current_organizer
 from app.core.security import hash_password
+from app.models.event import Event
 from app.models.organizer import Organizer
 from app.schemas.organizer import OrganizerCreate, OrganizerRead, OrganizerUpdate
 
@@ -83,3 +85,26 @@ def update_organizer(
 
     db.refresh(organizer)
     return organizer
+
+
+@router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)
+def delete_organizer(
+    db: DbSession,
+    organizer: CurrentOrganizer,
+) -> Response:
+    if db.scalar(
+        select(Event.id)
+        .where(Event.organizer_id == organizer.id)
+        .limit(1)
+    ) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Não é possível excluir uma organização que possui eventos. "
+                "Exclua ou transfira os eventos antes."
+            ),
+        )
+
+    db.delete(organizer)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
