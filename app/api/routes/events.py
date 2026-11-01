@@ -1,16 +1,20 @@
+from datetime import timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import select
+from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import DbSession
 from app.api.routes.auth import get_current_organizer
 from app.models.event import Event
 from app.models.organizer import Organizer
+from app.models.registration import Registration
 from app.schemas.event import EventCreate, EventRead, EventUpdate
 
 router = APIRouter(prefix="/events", tags=["events"])
 CurrentOrganizer = Annotated[Organizer, Depends(get_current_organizer)]
+TICKET_GRACE_PERIOD = timedelta(hours=24)
 
 
 @router.post("", response_model=EventRead, status_code=status.HTTP_201_CREATED)
@@ -69,6 +73,12 @@ def update_event(
     event = get_owned_event(event_id, organizer.id, db)
     for field, value in data.model_dump().items():
         setattr(event, field, value)
+    db.flush()
+    db.execute(
+        update(Registration)
+        .where(Registration.event_id == event.id)
+        .values(ticket_expires_at=event.ends_at + TICKET_GRACE_PERIOD)
+    )
     db.commit()
     db.refresh(event)
     return event
@@ -82,5 +92,12 @@ def delete_event(
 ) -> Response:
     event = get_owned_event(event_id, organizer.id, db)
     db.delete(event)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Não é possível excluir um evento com inscrições.",
+        ) from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)
