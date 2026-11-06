@@ -3,7 +3,7 @@ x-podman:
 
 services:
   db:
-    image: postgres:17
+    image: docker.io/library/postgres:17
     pids_limit: 0
     container_name: postgres-local
     restart: unless-stopped
